@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { initViewer } from "../molstarEngine";
 
 export default function ViewerPanel() {
+
   const viewerRef = useRef(null);
 
   useEffect(() => {
@@ -15,8 +16,8 @@ export default function ViewerPanel() {
       ref={viewerRef}
       style={{
         width: "100%",
-        height: "100vh",   
-        background: "#000"
+        height: "100%",
+        position: "relative"
       }}
     />
   );

@@ -1,15 +1,14 @@
-import { Viewer } from "molstar/build/viewer/molstar";
-
 let viewer = null;
 
 export async function initViewer(container) {
-  viewer = await Viewer.create(container, {
+
+  viewer = await window.molstar.Viewer.create(container, {
     layoutIsExpanded: false,
-    layoutShowControls: false,
-    layoutShowLeftPanel: false,
-    layoutShowSequence: false,
+    layoutShowControls: true,
+    layoutShowSequence: true,
     layoutShowLog: false
   });
+
 }
 
 export function getViewer() {
