@@ -1,3 +1,4 @@
+GEMINI_API_KEY = "AIzaSyD7T9aUNoFNeggMBU94JaqUzXCTetEgF1c"
 const API_KEY = "";
 
 export async function askGemini(prompt) {

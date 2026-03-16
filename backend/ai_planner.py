@@ -4,6 +4,7 @@ from pdb_service import fetch_pdb_info
 from utils import extract_pdb_id
 from typing import List, Optional, Literal, Union
 import json
+import re
 
 client = genai.Client()
 
@@ -17,17 +18,20 @@ class VisualizationAction(BaseModel):
         "highlight",
         "measure_angle",
         "show_surface",
-        "zoom"
+        "zoom",
+        "color_protein",
+        "color_ligand"
     ]
     pdb_id: Optional[str] = None
     selection: Optional[str] = None
     atoms: Optional[List[str]] = None
+    color: Optional[str] = None
 
 
 class VisualizationPlan(BaseModel):
     mode: Literal["visualization"]
     text: str
-    pdb_id: str
+    pdb_id: Optional[str] = None
     actions: List[VisualizationAction]
 
 
@@ -40,46 +44,94 @@ Plan = Union[VisualizationPlan, InformationPlan]
 
 
 # =========================================================
-# System Prompt (Gemini Structured Mode)
+# Safety Normalizer
+# =========================================================
+
+def normalize_actions(plan):
+
+    if "actions" not in plan:
+        return plan
+
+    fixed = []
+
+    for action in plan["actions"]:
+
+        if isinstance(action, str):
+            fixed.append({"type": action})
+
+        elif isinstance(action, dict) and "type" not in action:
+            continue
+
+        else:
+            fixed.append(action)
+
+    plan["actions"] = fixed
+    return plan
+
+
+# =========================================================
+# Gemini System Prompt
 # =========================================================
 
 SYSTEM_PROMPT = """
 You are a molecular AI assistant.
 
 If the user asks for visualization or structure manipulation,
-return:
+return JSON like this:
 
 {
   "mode": "visualization",
-  "text": "... explanation ...",
-  "pdb_id": "...",
-  "actions": [...]
-}
-
-If the user asks for explanation, background, or description,
-return:
-
-{
-  "mode": "information",
-  "text": "... detailed explanation ..."
+  "text": "short explanation",
+  "pdb_id": "1ABC",
+  "actions": [
+    {"type": "load_structure", "pdb_id": "1ABC"},
+    {"type": "zoom"}
+  ]
 }
 
 Rules:
 - Return ONLY valid JSON
 - Never use markdown
-- Never invent unsupported action types
-- Never return empty fields
+- Never return actions as strings
 - Allowed action types:
-  load_structure
-  highlight
-  measure_angle
-  show_surface
-  zoom
+
+load_structure
+highlight
+show_surface
+zoom
+color_protein
+color_ligand
 """
 
 
 # =========================================================
-# Main Plan Generator (Hybrid Logic)
+# Helper: detect color commands
+# =========================================================
+
+def detect_color_command(text):
+
+    protein_match = re.search(r"color protein (\w+)", text)
+    ligand_match = re.search(r"color ligand (\w+)", text)
+
+    actions = []
+
+    if protein_match:
+        actions.append({
+            "type": "color_protein",
+            "color": protein_match.group(1)
+        })
+
+    if ligand_match:
+        actions.append({
+            "type": "color_ligand",
+            "color": ligand_match.group(1)
+        })
+
+    return actions
+
+
+# =========================================================
+# Main Plan Generator
 # =========================================================
 
 async def generate_plan(user_prompt: str):
@@ -88,10 +140,25 @@ async def generate_plan(user_prompt: str):
     pdb_id = extract_pdb_id(user_prompt)
 
     # =====================================================
-    # 1️⃣ Deterministic Visualization Mode
-    #    (Fast, reliable, PlayMolecule-like)
+    # Color commands
     # =====================================================
-    if pdb_id and any(word in lower for word in ["show", "load", "visualize", "surface"]):
+
+    color_actions = detect_color_command(lower)
+
+    if color_actions:
+
+        return {
+            "mode": "visualization",
+            "text": "Updating molecular colors",
+            "actions": color_actions
+        }
+
+
+    # =====================================================
+    # Show / Load structure
+    # =====================================================
+
+    if pdb_id and any(word in lower for word in ["show", "load", "visualize"]):
 
         info = fetch_pdb_info(pdb_id)
 
@@ -101,76 +168,96 @@ async def generate_plan(user_prompt: str):
                 "text": f"No data found for PDB ID {pdb_id}"
             }
 
-        actions = []
+        actions = [
+            {"type": "load_structure", "pdb_id": pdb_id},
+            {"type": "zoom"}
+        ]
 
-        # Always load structure
-        actions.append({
-            "type": "load_structure",
-            "pdb_id": pdb_id
-        })
-
-        # Always zoom
-        actions.append({
-            "type": "zoom"
-        })
-
-        # Highlight first ligand automatically
         ligands = info.get("ligands", [])
+
         if ligands and ligands[0] != "None":
             ligand_code = ligands[0]
+
             actions.append({
                 "type": "highlight",
                 "selection": f"resname {ligand_code}"
             })
 
-        # Surface if requested
         if "surface" in lower:
-            actions.append({
-                "type": "show_surface"
-            })
+            actions.append({"type": "show_surface"})
 
         return {
             "mode": "visualization",
             "text": (
                 f"Loaded {info['pdb_id']} — {info['title']}.\n\n"
-                f"Ligands detected: {', '.join(ligands) if ligands else 'None'}.\n"
+                f"Ligands detected: {', '.join(ligands)}.\n"
                 f"Structure ready for visualization."
             ),
             "pdb_id": pdb_id,
             "actions": actions
         }
 
-    # =====================================================
-    # 2️⃣ Grounded Explanation Mode
-    # =====================================================
-    if pdb_id and "explain" in lower:
 
-        info = fetch_pdb_info(pdb_id)
+    # =====================================================
+    # Highlight command
+    # =====================================================
 
-        if not info:
+    if "highlight" in lower:
+
+        words = lower.split()
+
+        if len(words) >= 2:
+
+            ligand = words[-1].upper()
+
             return {
-                "mode": "information",
-                "text": f"No data found for PDB ID {pdb_id}"
+                "mode": "visualization",
+                "text": f"Highlighting ligand {ligand}",
+                "actions": [
+                    {
+                        "type": "highlight",
+                        "selection": f"resname {ligand}"
+                    }
+                ]
             }
 
-        return {
-            "mode": "information",
-            "text": (
-                f"{info['pdb_id']} — {info['title']}\n\n"
-                f"Experimental Method: {info['experimental_method']}\n"
-                f"Resolution: {info['resolution']}\n"
-                f"Organism: {info['organism']}\n"
-                f"Polymer Entities: {info.get('polymer_entity_count')}\n"
-                f"Molecular Weight: {info.get('molecular_weight')}\n"
-                f"Ligands: {', '.join(info.get('ligands', [])) or 'None'}\n"
-                f"Deposited On: {info['deposition_date']}"
-            )
-        }
 
     # =====================================================
-    # 3️⃣ Gemini Structured AI Mode (Complex reasoning)
+    # Surface command
     # =====================================================
+
+    if "surface" in lower:
+
+        return {
+            "mode": "visualization",
+            "text": "Displaying molecular surface",
+            "actions": [
+                {"type": "show_surface"}
+            ]
+        }
+
+
+    # =====================================================
+    # Zoom command
+    # =====================================================
+
+    if "zoom" in lower:
+
+        return {
+            "mode": "visualization",
+            "text": "Resetting camera view",
+            "actions": [
+                {"type": "zoom"}
+            ]
+        }
+
+
+    # =====================================================
+    # Gemini fallback
+    # =====================================================
+
     try:
+
         response = client.models.generate_content(
             model="models/gemini-2.5-flash",
             contents=SYSTEM_PROMPT + "\n\nUser request:\n" + user_prompt,
@@ -179,12 +266,15 @@ async def generate_plan(user_prompt: str):
 
         parsed = json.loads(response.text)
 
+        parsed = normalize_actions(parsed)
+
         adapter = TypeAdapter(Plan)
         validated = adapter.validate_python(parsed)
 
         return validated.model_dump()
 
     except Exception as e:
+
         return {
             "mode": "information",
             "text": f"AI planning failed: {str(e)}"

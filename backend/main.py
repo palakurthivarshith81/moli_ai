@@ -15,7 +15,18 @@ app.add_middleware(
 class ChatRequest(BaseModel):
     message: str
 
+
 @app.post("/chat")
 async def chat(req: ChatRequest):
-    plan = await generate_plan(req.message)
-    return plan
+
+    try:
+        plan = await generate_plan(req.message)
+        return plan
+
+    except Exception as e:
+        print("Planner error:", e)
+
+        return {
+            "text": "Planner failed to generate action.",
+            "actions": []
+        }
