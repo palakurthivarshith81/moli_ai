@@ -1,16 +1,29 @@
 import { useState, useRef, useEffect } from "react";
+import MessageBubble from "./MessageBubble";
 import { executePlan } from "../actionExecutor";
 
-function ChatBox() {
+export default function ChatBox() {
 
   const [text, setText] = useState("");
   const [messages, setMessages] = useState([]);
   const chatEndRef = useRef(null);
 
-  // auto scroll chat
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  //  Fake streaming function
+  const streamText = async (fullText) => {
+    for (let i = 0; i < fullText.length; i++) {
+      await new Promise(res => setTimeout(res, 10));
+
+      setMessages(prev => {
+        const updated = [...prev];
+        updated[updated.length - 1].content += fullText[i];
+        return updated;
+      });
+    }
+  };
 
   const handleSend = async () => {
 
@@ -18,142 +31,76 @@ function ChatBox() {
 
     const userInput = text.trim();
 
-    const userMessage = {
-      role: "user",
-      content: userInput
-    };
+    // user message
+    setMessages(prev => [...prev, { role: "user", content: userInput }]);
+    setText("");
 
-    setMessages(prev => [...prev, userMessage]);
+    // empty AI message
+    setMessages(prev => [...prev, { role: "ai", content: "" }]);
 
     try {
 
+      //  CALL NORMAL API (important)
       const res = await fetch("http://127.0.0.1:8000/chat", {
         method: "POST",
         headers: {
           "Content-Type": "application/json"
         },
-        body: JSON.stringify({ message: userInput })
+        body: JSON.stringify({
+          message: userInput,
+          mode: "free"
+        })
       });
 
-      if (!res.ok) {
-        throw new Error("Backend returned status " + res.status);
+      const data = await res.json();
+
+      //  EXECUTE ACTIONS FIRST
+      if (data.mode === "visualization" && data.actions) {
+        await executePlan(data);
       }
 
-      const plan = await res.json();
-
-      console.log("AI Plan:", plan);
-
-      // Execute Mol* actions
-      if (plan.actions) {
-        await executePlan(plan);
-      }
-
-      const aiMessage = {
-        role: "ai",
-        content: plan.text || "Visualization updated."
-      };
-
-      setMessages(prev => [...prev, aiMessage]);
+      //  STREAM TEXT (smooth UI)
+      await streamText(data.text || "No response");
 
     } catch (err) {
-
-      console.error("Backend error:", err);
-
-      let errorMessage = "Backend connection failed. Check FastAPI server.";
-
-      if (err.message && err.message.includes("429")) {
-        errorMessage =
-          "AI quota exceeded. Please wait before sending another request.";
-      }
+      console.error(err);
 
       setMessages(prev => [
         ...prev,
-        { role: "ai", content: errorMessage }
+        { role: "ai", content: "Error fetching response" }
       ]);
-
     }
-
-    setText("");
   };
 
-  // ENTER key support
   const handleKeyDown = (e) => {
-
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
-
   };
 
   return (
-
-    <div
-      style={{
-        color: "white",
-        padding: "10px",
-        fontFamily: "Arial",
-        display: "flex",
-        flexDirection: "column",
-        height: "100%"
-      }}
-    >
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", color: "white" }}>
 
       <h3>Molecular AI</h3>
 
-      {/* Chat messages */}
-      <div
-        style={{
-          flex: 1,
-          overflowY: "auto",
-          border: "1px solid #444",
-          padding: "10px",
-          marginBottom: "10px"
-        }}
-      >
-
+      <div style={{ flex: 1, overflowY: "auto", border: "1px solid #333", padding: "10px" }}>
         {messages.map((m, i) => (
-          <div key={i} style={{ marginBottom: "6px" }}>
-            <b>{m.role === "user" ? "You:" : "AI:"}</b> {m.content}
-          </div>
+          <MessageBubble key={i} role={m.role} content={m.content} />
         ))}
-
         <div ref={chatEndRef} />
-
       </div>
 
-      {/* Input area */}
-      <div style={{ display: "flex" }}>
-
+      <div style={{ display: "flex", marginTop: "10px" }}>
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask about a protein or type: show 1hsg"
-          style={{
-            width: "70%",
-            padding: "8px",
-            marginRight: "5px",
-            resize: "none",
-            height: "40px"
-          }}
+          style={{ flex: 1 }}
         />
-
-        <button
-          onClick={handleSend}
-          style={{
-            padding: "8px 14px",
-            cursor: "pointer"
-          }}
-        >
-          Send
-        </button>
-
+        <button onClick={handleSend}>Send</button>
       </div>
 
     </div>
-
   );
 }
-
-export default ChatBox;

@@ -1,7 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from ai_planner import generate_plan
+
+from ai_planner import generate_plan, generate_plan_stream
 
 app = FastAPI()
 
@@ -14,19 +16,21 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     message: str
+    mode: str = "free"
 
 
+# NORMAL API
 @app.post("/chat")
 async def chat(req: ChatRequest):
+    return await generate_plan(req.message, req.mode)
 
-    try:
-        plan = await generate_plan(req.message)
-        return plan
 
-    except Exception as e:
-        print("Planner error:", e)
+# STREAM API
+@app.post("/chat_stream")
+async def chat_stream(req: ChatRequest):
 
-        return {
-            "text": "Planner failed to generate action.",
-            "actions": []
-        }
+    async def generator():
+        async for chunk in generate_plan_stream(req.message, req.mode):
+            yield chunk
+
+    return StreamingResponse(generator(), media_type="text/plain")

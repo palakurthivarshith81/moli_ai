@@ -23,7 +23,7 @@ export default function App() {
         width: "30%",
         height: "100%",
         borderLeft: "2px solid #333",
-        background: "#111",
+        background: "#0f172a",
         padding: "10px"
       }}>
         <ChatBox />

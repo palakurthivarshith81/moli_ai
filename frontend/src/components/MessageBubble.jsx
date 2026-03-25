@@ -7,7 +7,7 @@ export default function MessageBubble({ role, content }) {
       style={{
         display: "flex",
         justifyContent: isUser ? "flex-end" : "flex-start",
-        marginBottom: "10px"
+        marginBottom: "12px"
       }}
     >
       <div
@@ -16,7 +16,9 @@ export default function MessageBubble({ role, content }) {
           padding: "12px",
           borderRadius: "12px",
           background: isUser ? "#2563eb" : "#1f2937",
-          color: "white"
+          color: "white",
+          whiteSpace: "pre-wrap",
+          lineHeight: "1.4"
         }}
       >
         {content}
