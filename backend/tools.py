@@ -1,4 +1,3 @@
-# tools.py
 
 import math
 from typing import Tuple

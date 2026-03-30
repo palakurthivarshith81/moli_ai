@@ -1,5 +1,7 @@
 import { getViewer } from "./molstarEngine";
 
+/* ================= UTILITIES ================= */
+
 function wait(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -18,11 +20,16 @@ function colorToHex(color) {
     gray: 0x808080,
     black: 0x000000
   };
+
   return colors[color?.toLowerCase()] || 0xffffff;
 }
 
+/* ================= STRUCTURE WAIT ================= */
+
 async function waitForStructure(viewer) {
-  for (let i = 0; i < 12; i++) {
+
+  for (let i = 0; i < 15; i++) {
+
     const structures =
       viewer.plugin.managers.structure.hierarchy.current.structures;
 
@@ -30,48 +37,114 @@ async function waitForStructure(viewer) {
       return structures[0];
     }
 
-    await wait(250);
+    await wait(200);
   }
+
   return null;
 }
 
-function findLigandComponent(structure) {
+/* ================= COMPONENT FINDERS ================= */
+
+function findPolymer(structure) {
+  return structure.components.find(c =>
+    c.cell?.obj?.label?.toLowerCase().includes("polymer")
+  ) || structure.components[0];
+}
+
+function findLigand(structure) {
+
   return structure.components.find(c => {
+
     const label = c.cell?.obj?.label?.toLowerCase() || "";
+
     return label.includes("ligand") || label.includes("non-polymer");
+
   });
 }
 
-// ================= REPLACE =================
-async function replaceRepresentation(viewer, component, params) {
+/* ================= CLEAR VIEW ================= */
 
-  const plugin = viewer.plugin;
-  const reps = component.representations || [];
-
-  for (const r of reps) {
-    try {
-      await plugin.managers.structure.component.removeRepresentation(component, r);
-    } catch {}
-  }
-
-  await wait(100);
-
-  await plugin.builders.structure.representation.addRepresentation(
-    component.cell,
-    params
-  );
-
-  plugin.canvas3d?.requestDraw(true);
-}
-
-// ================= CLEAR =================
 function clearAllRepresentations(viewer, structure) {
+
   structure.components.forEach(c => {
+
     try {
       viewer.plugin.managers.structure.component.clearRepresentations(c);
     } catch {}
+
   });
+
 }
+
+/* ================= REFRESH ================= */
+
+function refreshViewer(viewer) {
+
+  viewer.plugin.managers.camera.reset();
+  viewer.plugin.canvas3d?.requestDraw(true);
+
+}
+
+/* ================= RESIDUE LABELS ================= */
+
+async function labelResiduesNearLigand(viewer, structure) {
+
+  const ligand = findLigand(structure);
+  if (!ligand) return;
+
+  await viewer.plugin.builders.structure.representation.addRepresentation(
+    ligand.cell,
+    {
+      type: "label",
+      color: "uniform",
+      colorParams: { value: 0xffffff },
+      sizeFactor: 1.5
+    }
+  );
+
+  viewer.plugin.canvas3d?.requestDraw(true);
+}
+
+/* ================= BINDING POCKET ================= */
+
+async function showBindingPocket(viewer, structure) {
+
+  const polymer = findPolymer(structure);
+
+  await viewer.plugin.builders.structure.representation.addRepresentation(
+    polymer.cell,
+    {
+      type: "molecular-surface",
+      typeParams: { alpha: 0.35 },
+      color: "uniform",
+      colorParams: { value: 0xcccccc }
+    }
+  );
+
+  viewer.plugin.canvas3d?.requestDraw(true);
+}
+
+/* ================= CHART TRIGGER ================= */
+
+function triggerChart(chartType, data = null) {
+
+  const defaultData = [
+    { residue: "HIS93", distance: 2.1 },
+    { residue: "VAL68", distance: 3.2 },
+    { residue: "LEU29", distance: 3.8 }
+  ];
+
+  window.dispatchEvent(
+    new CustomEvent("molstar-chart", {
+      detail: {
+        chartType,
+        data: data || defaultData
+      }
+    })
+  );
+}
+
+/* ================= EXECUTION ENGINE ================= */
 
 export async function executePlan(plan) {
 
@@ -80,11 +153,16 @@ export async function executePlan(plan) {
 
   for (const action of plan.actions) {
 
+    console.log("Executing action:", action);
+
     switch (action.type) {
 
-      // ================= LOAD =================
+      /* ================= LOAD STRUCTURE ================= */
+
       case "load_structure":
+
         try {
+
           await viewer.plugin.clear();
 
           await viewer.loadStructureFromUrl(
@@ -95,152 +173,223 @@ export async function executePlan(plan) {
           const structure = await waitForStructure(viewer);
           if (!structure) break;
 
-          continue;
+          refreshViewer(viewer);
 
         } catch (err) {
+
           console.error("Load failed:", err);
+
         }
+
         break;
 
-      // ================= ZOOM =================
+      /* ================= ZOOM ================= */
+
       case "zoom":
-        viewer.plugin.managers.camera.reset();
-        break;
 
-      // ================= SURFACE =================
-      case "show_surface":
+        const zoomStruct = await waitForStructure(viewer);
+        if (!zoomStruct) break;
 
-        const structure1 = await waitForStructure(viewer);
-        if (!structure1) break;
-
-        await replaceRepresentation(viewer, structure1.components[0], {
-          type: "molecular-surface"
-        });
-
-        break;
-
-      // ================= HIGHLIGHT =================
-      case "highlight":
-
-        const structure2 = await waitForStructure(viewer);
-        if (!structure2) break;
-
-        const ligand = findLigandComponent(structure2);
-        if (!ligand) break;
-
-        await replaceRepresentation(viewer, ligand, {
-          type: "ball-and-stick",
-          color: "uniform",
-          colorParams: { value: 0xff0000 }
-        });
-
-        break;
-
-      // ================= COLOR PROTEIN =================
-      case "color_protein":
-
-        const structure3 = await waitForStructure(viewer);
-        if (!structure3) break;
-
-        await replaceRepresentation(viewer, structure3.components[0], {
-          type: "cartoon",
-          color: "uniform",
-          colorParams: { value: colorToHex(action.color) }
-        });
-
-        break;
-
-      // ================= COLOR LIGAND =================
-      case "color_ligand":
-
-        const structure4 = await waitForStructure(viewer);
-        if (!structure4) break;
-
-        const ligand2 = findLigandComponent(structure4);
-        if (!ligand2) break;
-
-        await replaceRepresentation(viewer, ligand2, {
-          type: "ball-and-stick",
-          color: "uniform",
-          colorParams: { value: colorToHex(action.color) }
-        });
-
-        break;
-
-      // =================  PUBLICATION VIEW =================
-      case "publication_view":
-
-        console.log("Publication view");
-
-        const structure5 = await waitForStructure(viewer);
-        if (!structure5) break;
-
-        const polymer = structure5.components[0];
-        const ligand3 = findLigandComponent(structure5);
-
-        //  CLEAR EVERYTHING
-        clearAllRepresentations(viewer, structure5);
-
-        // ===== CARTOON (VISIBLE CORE)
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          polymer.cell,
-          {
-            type: "cartoon",
-            color: "chain-id"
-          }
+        viewer.plugin.managers.camera.focusLoci(
+          zoomStruct.cell.obj.data
         );
-
-        // ===== SURFACE ( FIXED LOOK)
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          polymer.cell,
-          {
-            type: "molecular-surface",
-            typeParams: {
-              alpha: 0.2  //  MUCH BETTER TRANSPARENCY
-            },
-            color: "uniform",
-            colorParams: {
-              value: 0xcccccc   //  LIGHT GRAY (IMPORTANT)
-            }
-          }
-        );
-
-        // ===== LIGAND (FOCUS)
-        if (ligand3) {
-          await viewer.plugin.builders.structure.representation.addRepresentation(
-            ligand3.cell,
-            {
-              type: "ball-and-stick",
-              size: "physical",
-              sizeParams: {
-              sizeFactor: 1.8  //  increase size
-            },
-
-            color: "element-symbol",
-
-            colorParams: {
-            value: 0xff0000   //  bright red highlight
-              
-            }}
-            );
-        }
-
-        // ===== LIGHTING (PRO LOOK)
-        viewer.plugin.canvas3d?.setProps({
-          renderer: {
-            ambientIntensity: 0.6,
-            lightIntensity: 1.2
-          }
-        });
 
         viewer.plugin.canvas3d?.requestDraw(true);
 
         break;
 
+      /* ================= SHOW SURFACE ================= */
+
+      case "show_surface":
+
+        const surfaceStruct = await waitForStructure(viewer);
+        if (!surfaceStruct) break;
+
+        const polymer1 = findPolymer(surfaceStruct);
+
+        clearAllRepresentations(viewer, surfaceStruct);
+
+        await viewer.plugin.builders.structure.representation.addRepresentation(
+          polymer1.cell,
+          {
+            type: "molecular-surface",
+            typeParams: { alpha: 0.7 }
+          }
+        );
+
+        refreshViewer(viewer);
+
+        break;
+
+      /* ================= HIGHLIGHT LIGAND ================= */
+
+      case "highlight":
+
+        const struct2 = await waitForStructure(viewer);
+        if (!struct2) break;
+
+        const ligand = findLigand(struct2);
+        if (!ligand) break;
+
+        await viewer.plugin.builders.structure.representation.addRepresentation(
+          ligand.cell,
+          {
+            type: "ball-and-stick",
+            color: "uniform",
+            colorParams: { value: 0xff0000 },
+            size: "physical",
+            sizeParams: { sizeFactor: 2 }
+          }
+        );
+
+        viewer.plugin.managers.camera.focusLoci(
+          ligand.cell.obj.data
+        );
+
+        viewer.plugin.canvas3d?.requestDraw(true);
+
+        /* AUTO SHOW CHART */
+
+        triggerChart("ligand_interactions");
+
+        break;
+
+      /* ================= COLOR PROTEIN ================= */
+
+      case "color_protein":
+
+        const struct3 = await waitForStructure(viewer);
+        if (!struct3) break;
+
+        const polymer = findPolymer(struct3);
+
+        clearAllRepresentations(viewer, struct3);
+
+        await viewer.plugin.builders.structure.representation.addRepresentation(
+          polymer.cell,
+          {
+            type: "cartoon",
+            color: "uniform",
+            colorParams: { value: colorToHex(action.color) }
+          }
+        );
+
+        refreshViewer(viewer);
+
+        break;
+
+      /* ================= COLOR LIGAND ================= */
+
+      case "color_ligand":
+
+        const struct4 = await waitForStructure(viewer);
+        if (!struct4) break;
+
+        const ligand2 = findLigand(struct4);
+        if (!ligand2) break;
+
+        await viewer.plugin.builders.structure.representation.addRepresentation(
+          ligand2.cell,
+          {
+            type: "ball-and-stick",
+            color: "uniform",
+            colorParams: { value: colorToHex(action.color) }
+          }
+        );
+
+        viewer.plugin.managers.camera.focusLoci(
+          ligand2.cell.obj.data
+        );
+
+        viewer.plugin.canvas3d?.requestDraw(true);
+
+        break;
+
+      /* ================= PUBLICATION VIEW ================= */
+
+      case "publication_view":
+
+        const struct5 = await waitForStructure(viewer);
+        if (!struct5) break;
+
+        const polymer5 = findPolymer(struct5);
+        const ligand3 = findLigand(struct5);
+
+        clearAllRepresentations(viewer, struct5);
+
+        await viewer.plugin.builders.structure.representation.addRepresentation(
+          polymer5.cell,
+          { type: "cartoon", color: "chain-id" }
+        );
+
+        await viewer.plugin.builders.structure.representation.addRepresentation(
+          polymer5.cell,
+          {
+            type: "molecular-surface",
+            typeParams: { alpha: 0.25 },
+            color: "uniform",
+            colorParams: { value: 0xcccccc }
+          }
+        );
+
+        if (ligand3) {
+
+          await viewer.plugin.builders.structure.representation.addRepresentation(
+            ligand3.cell,
+            {
+              type: "ball-and-stick",
+              size: "physical",
+              sizeParams: { sizeFactor: 2 },
+              color: "element-symbol"
+            }
+          );
+
+          viewer.plugin.managers.camera.focusLoci(
+            ligand3.cell.obj.data
+          );
+
+        }
+
+        viewer.plugin.canvas3d?.requestDraw(true);
+
+        break;
+
+      /* ================= RESIDUE LABELING ================= */
+
+      case "label_residues":
+
+        const struct7 = await waitForStructure(viewer);
+        if (!struct7) break;
+
+        await labelResiduesNearLigand(viewer, struct7);
+
+        break;
+
+      /* ================= BINDING POCKET ================= */
+
+      case "show_binding_pocket":
+
+        const struct8 = await waitForStructure(viewer);
+        if (!struct8) break;
+
+        await showBindingPocket(viewer, struct8);
+
+        break;
+
+      /* ================= CHART ================= */
+
+      case "show_chart":
+
+        triggerChart(action.chart, action.data);
+
+        break;
+
       default:
+
         console.log("Unknown action:", action.type);
+
     }
 
-    await wait(80);
+    await wait(150);
   }
 }

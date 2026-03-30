@@ -9,8 +9,9 @@ API_KEY = os.getenv("OPENROUTER_API_KEY")
 # ================= MODELS =================
 
 FREE_MODELS = [
-    "stepfun/step-3.5-flash:free",
-    #"google/gemma-3n-e4b-it:free"   #  fallback model (important)
+   # "stepfun/step-3.5-flash:free",
+    #"google/gemma-3n-e4b-it:free"  
+    "nvidia/nemotron-3-super-120b-a12b:free" 
 ]
 
 PREMIUM_MODELS = [
@@ -48,6 +49,7 @@ Allowed actions:
 - show_surface
 - highlight
 - color_protein
+-focus_compound
 
 If no action → return "actions": []
 """

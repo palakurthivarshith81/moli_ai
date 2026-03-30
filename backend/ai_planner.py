@@ -19,7 +19,8 @@ class VisualizationAction(BaseModel):
         "zoom",
         "color_protein",
         "color_ligand",
-        "publication_view"   #  FIXED
+        "publication_view"   
+        "focus_compound"
     ]
     pdb_id: Optional[str] = None
     selection: Optional[str] = None
@@ -51,7 +52,8 @@ VALID_ACTIONS = {
     "highlight",
     "color_protein",
     "color_ligand",
-    "publication_view"   #  IMPORTANT
+    "publication_view" 
+    "focus_compound" 
 }
 
 
@@ -80,7 +82,7 @@ async def generate_plan(user_prompt: str, mode="free"):
             "actions": [
                 {"type": "load_structure", "pdb_id": pdb_id},
                 {"type": "zoom"},
-                {"type": "publication_view"}   #  FIXED
+                {"type": "publication_view"}   
             ]
         }
 
@@ -116,8 +118,20 @@ async def generate_plan(user_prompt: str, mode="free"):
             actions.append({"type": "show_surface"})
 
         # Ligand
-        if "ligand" in lower and not any(a.get("type") == "highlight" for a in actions):
+      #  if "ligand" in lower and not any(a.get("type") == "highlight" for a in actions):
+       #     actions.append({"type": "highlight", "selection": "ligand"})
+       # Ligand focus
+        if "ligand" in lower or "compound" in lower:
+
+         if "zoom" in lower or "focus" in lower:
+            actions.append({"type": "focus_compound"})
+
+         elif not any(a.get("type") == "highlight" for a in actions):
             actions.append({"type": "highlight", "selection": "ligand"})
+
+            # Focus compound
+        if ("compound" in lower or "focus" in lower) and pdb_id:
+            actions.append({"type": "focus_compound"})
 
         # Color
         if "color" in lower and not any(a.get("type") == "color_protein" for a in actions):
