@@ -1,5 +1,6 @@
 import os
 import requests
+import asyncio
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -9,9 +10,8 @@ API_KEY = os.getenv("OPENROUTER_API_KEY")
 # ================= MODELS =================
 
 FREE_MODELS = [
-   # "stepfun/step-3.5-flash:free",
-    #"google/gemma-3n-e4b-it:free"  
-    "nvidia/nemotron-3-super-120b-a12b:free" 
+   # "nvidia/nemotron-3-super-120b-a12b:free"
+    "stepfun/step-3.5-flash:free"
 ]
 
 PREMIUM_MODELS = [
@@ -49,7 +49,10 @@ Allowed actions:
 - show_surface
 - highlight
 - color_protein
--focus_compound
+- color_ligand
+- publication_view
+- focus_compound
+- label_residues
 
 If no action → return "actions": []
 """
@@ -77,9 +80,12 @@ async def call_llm(prompt, mode="free"):
     for model in models:
 
         try:
+
             print(f"\nTrying ({mode}): {model}")
 
-            res = requests.post(
+            # run blocking request in thread
+            res = await asyncio.to_thread(
+                requests.post,
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {API_KEY}",
@@ -148,7 +154,7 @@ async def call_llm(prompt, mode="free"):
 
     # ================= FALLBACK =================
 
-    print("\n All models failed. Using fallback.")
+    print("\nAll models failed. Using fallback.")
 
     fallback_json = """
     {

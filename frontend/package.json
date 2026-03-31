@@ -10,7 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "molstar": "^5.7.0",
+    "molstar": "4.18.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "recharts": "^3.8.1"

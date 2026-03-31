@@ -19,8 +19,10 @@ class VisualizationAction(BaseModel):
         "zoom",
         "color_protein",
         "color_ligand",
-        "publication_view"   
-        "focus_compound"
+        "publication_view",
+        "focus_compound",
+        "label_residues",
+        "show_interactions"
     ]
     pdb_id: Optional[str] = None
     selection: Optional[str] = None
@@ -52,8 +54,10 @@ VALID_ACTIONS = {
     "highlight",
     "color_protein",
     "color_ligand",
-    "publication_view" 
-    "focus_compound" 
+    "publication_view",
+    "focus_compound",
+    "label_residues",
+    "show_interactions"
 }
 
 
@@ -74,82 +78,116 @@ async def generate_plan(user_prompt: str, mode="free"):
     pdb_id = extract_pdb_id(user_prompt)
     lower = user_prompt.lower()
 
-    # ================= PUBLICATION RULE =================
+    # ================= PUBLICATION VIEW =================
+
     if pdb_id and ("publication" in lower or "publication view" in lower):
+
         return {
             "mode": "visualization",
             "text": f"Showing publication-ready view for {pdb_id}",
             "actions": [
                 {"type": "load_structure", "pdb_id": pdb_id},
                 {"type": "zoom"},
-                {"type": "publication_view"}   
+                {"type": "publication_view"},
+                {"type": "label_residues"}
+            ]
+        }
+
+    # ================= INTERACTION VIEW =================
+
+    if pdb_id and (
+        "interaction" in lower
+        or "binding residue" in lower
+        or "binding site" in lower
+        or "show interactions" in lower
+    ):
+
+        return {
+            "mode": "visualization",
+            "text": f"Showing ligand binding interactions for {pdb_id}",
+            "actions": [
+                {"type": "load_structure", "pdb_id": pdb_id},
+                {"type": "zoom"},
+                {"type": "show_interactions"}
             ]
         }
 
     # ================= LLM =================
+
     response = await call_llm(user_prompt, mode)
     raw_text = response.get("text", "{}")
 
     try:
+
         data = json.loads(raw_text)
         text = data.get("text", "")
         actions = data.get("actions", [])
 
     except Exception as e:
+
         print("JSON PARSE ERROR:", e)
+
         return {
             "mode": "information",
             "text": "AI response parsing failed. Try again."
         }
 
     # ================= VALIDATE =================
+
     actions = validate_actions(actions)
 
     # ================= FORCE ACTIONS =================
+
     if pdb_id:
 
-        # Ensure structure load
         if not any(a.get("type") == "load_structure" for a in actions):
             actions.insert(0, {"type": "load_structure", "pdb_id": pdb_id})
             actions.insert(1, {"type": "zoom"})
 
         # Surface
+
         if "surface" in lower and not any(a.get("type") == "show_surface" for a in actions):
             actions.append({"type": "show_surface"})
 
         # Ligand
-      #  if "ligand" in lower and not any(a.get("type") == "highlight" for a in actions):
-       #     actions.append({"type": "highlight", "selection": "ligand"})
-       # Ligand focus
+
         if "ligand" in lower or "compound" in lower:
 
-         if "zoom" in lower or "focus" in lower:
-            actions.append({"type": "focus_compound"})
+            if "zoom" in lower or "focus" in lower:
+                actions.append({"type": "focus_compound"})
 
-         elif not any(a.get("type") == "highlight" for a in actions):
-            actions.append({"type": "highlight", "selection": "ligand"})
+            elif not any(a.get("type") == "highlight" for a in actions):
+                actions.append({"type": "highlight", "selection": "ligand"})
 
-            # Focus compound
+        # Focus compound
+
         if ("compound" in lower or "focus" in lower) and pdb_id:
             actions.append({"type": "focus_compound"})
 
-        # Color
+        # Protein coloring
+
         if "color" in lower and not any(a.get("type") == "color_protein" for a in actions):
+
             color = "cyan"
+
             if "red" in lower:
                 color = "red"
+
             elif "blue" in lower:
                 color = "blue"
 
             actions.append({"type": "color_protein", "color": color})
 
     # ================= DEBUG =================
+
     print("FINAL ACTIONS:", actions)
 
     # ================= PDB INFO =================
+
     pdb_info = fetch_pdb_info(pdb_id) if pdb_id else None
 
     if pdb_info:
+
         text += f"\n\n--- STRUCTURE DATA ---"
         text += f"\nTitle: {pdb_info['title']}"
         text += f"\nMethod: {pdb_info['experimental_method']}"
@@ -160,9 +198,11 @@ async def generate_plan(user_prompt: str, mode="free"):
         text += "\n\n--- TRY IN VIEWER ---"
         text += "\n- show surface"
         text += "\n- highlight ligand"
+        text += "\n- show interactions"
         text += "\n- color protein red"
 
     # ================= FINAL =================
+
     return {
         "mode": "visualization" if actions else "information",
         "text": text,
