@@ -26,81 +26,105 @@ function colorToHex(color) {
 /* ================= STRUCTURE WAIT ================= */
 
 async function waitForStructure(viewer) {
-
   for (let i = 0; i < 15; i++) {
-
     const structures =
       viewer.plugin.managers.structure.hierarchy.current.structures;
-
     if (structures.length && structures[0].cell?.obj?.data) {
       return structures[0];
     }
-
     await wait(200);
-
   }
-
   return null;
-
 }
 
 /* ================= COMPONENT FINDERS ================= */
 
 function findPolymer(structure) {
-
   return structure.components.find(c =>
     c.cell?.obj?.label?.toLowerCase().includes("polymer")
   ) || structure.components[0];
-
 }
 
 function findLigand(structure) {
-
   return structure.components.find(c => {
-
     const label = c.cell?.obj?.label?.toLowerCase() || "";
     return label.includes("ligand") || label.includes("non-polymer");
-
   });
+}
 
+/* ================= DIRECT STATE TREE COLOR UPDATE (THE REAL FIX) ================= */
+//
+// Mol* stores each representation as a node in its state tree.
+// The node's `params` object has a `colorTheme` field.
+// plugin.build().to(ref).update(newParams) is exactly what the Mol* UI
+// does when you click a color swatch — it patches that node in place,
+// triggers a re-render, and never needs a clear/re-add cycle.
+//
+async function applyColorToComponent(viewer, component, hexColor) {
+  if (!component?.representations?.length) {
+    console.warn("[applyColor] No representations found on component");
+    return false;
+  }
+
+  try {
+    const update = viewer.plugin.build();
+
+    for (const rep of component.representations) {
+      const cell = rep.cell;
+      if (!cell) continue;
+
+      const ref = cell.transform.ref;
+      const oldParams = cell.transform.params ?? {};
+
+      // Patch only colorTheme — leave type, sizeTheme, etc. untouched
+      const newParams = {
+        ...oldParams,
+        colorTheme: {
+          name: "uniform",
+          params: { value: hexColor }
+        }
+      };
+
+      update.to(ref).update(newParams);
+      console.log("[applyColor] Queued update for ref:", ref, "color:", hexColor);
+    }
+
+    await update.commit();
+    console.log("[applyColor] Commit done");
+    return true;
+  } catch (e) {
+    console.error("[applyColor] State tree update failed:", e);
+    return false;
+  }
 }
 
 /* ================= CLEAR VIEW ================= */
 
-function clearAllRepresentations(viewer, structure) {
-
-  structure.components.forEach(c => {
-
+async function clearAllRepresentations(viewer, structure) {
+  for (const comp of structure.components) {
     try {
-      viewer.plugin.managers.structure.component.clearRepresentations(c);
+      viewer.plugin.managers.structure.component.clearRepresentations(comp);
     } catch {}
-
-  });
-
+  }
+  await wait(200);
 }
 
 /* ================= CAMERA ================= */
 
 function focusCamera(viewer, obj) {
-
   try {
-
     viewer.plugin.managers.camera.reset();
-
     if (obj?.boundary) {
       viewer.plugin.managers.camera.focusSphere(obj.boundary.sphere);
     } else {
       viewer.plugin.managers.camera.focusLoci(obj);
     }
-
   } catch {}
-
 }
 
 /* ================= INTERACTION DATA ================= */
 
 function findNearbyResidues() {
-
   return [
     { residue: "ASP25", distance: 2.4 },
     { residue: "GLY27", distance: 2.9 },
@@ -108,26 +132,21 @@ function findNearbyResidues() {
     { residue: "ILE50", distance: 3.4 },
     { residue: "GLY48", distance: 3.7 }
   ];
-
 }
 
 /* ================= CLEAN INTERACTION VIEW ================= */
 
 async function showInteractionResidues(viewer, structure) {
-
   const ligand = findLigand(structure);
   const polymer = findPolymer(structure);
-
   if (!ligand || !polymer) return;
 
   clearAllRepresentations(viewer, structure);
+  await wait(100);
 
   await viewer.plugin.builders.structure.representation.addRepresentation(
     polymer.cell,
-    {
-      type: "cartoon",
-      color: "chain-id"
-    }
+    { type: "cartoon", color: "chain-id" }
   );
 
   await viewer.plugin.builders.structure.representation.addRepresentation(
@@ -141,38 +160,25 @@ async function showInteractionResidues(viewer, structure) {
   );
 
   focusCamera(viewer, ligand.cell.obj.data);
-
   triggerChart("ligand_interactions", findNearbyResidues());
-
 }
 
-/* ================= LABEL RESIDUES (full protein — kept for reference) ================= */
+/* ================= LABEL RESIDUES (full protein) ================= */
 
 async function labelResidues(viewer, structure) {
-
   const polymer = findPolymer(structure);
   const ligand = findLigand(structure);
-
   if (!polymer) return;
 
-  /* clear scene safely */
-
   clearAllRepresentations(viewer, structure);
-
-  /* redraw protein */
+  await wait(100);
 
   await viewer.plugin.builders.structure.representation.addRepresentation(
     polymer.cell,
-    {
-      type: "cartoon",
-      color: "chain-id"
-    }
+    { type: "cartoon", color: "chain-id" }
   );
 
-  /* redraw ligand */
-
   if (ligand) {
-
     await viewer.plugin.builders.structure.representation.addRepresentation(
       ligand.cell,
       {
@@ -182,12 +188,8 @@ async function labelResidues(viewer, structure) {
         color: "element-symbol"
       }
     );
-
     focusCamera(viewer, ligand.cell.obj.data);
-
   }
-
-  /* add residue labels */
 
   await viewer.plugin.builders.structure.representation.addRepresentation(
     polymer.cell,
@@ -199,31 +201,24 @@ async function labelResidues(viewer, structure) {
       sizeFactor: 0.45
     }
   );
-
 }
 
-/* ================= LABEL INTERACTING RESIDUES ONLY (NEW) ================= */
+/* ================= LABEL INTERACTING RESIDUES ONLY ================= */
 
 async function labelInteractingResidues(viewer, structure) {
-
   const ligand = findLigand(structure);
   const polymer = findPolymer(structure);
-
   if (!polymer) return;
 
   clearAllRepresentations(viewer, structure);
-
-  /* redraw protein as cartoon */
+  await wait(100);
 
   await viewer.plugin.builders.structure.representation.addRepresentation(
     polymer.cell,
     { type: "cartoon", color: "chain-id" }
   );
 
-  /* redraw ligand */
-
   if (ligand) {
-
     await viewer.plugin.builders.structure.representation.addRepresentation(
       ligand.cell,
       {
@@ -233,16 +228,10 @@ async function labelInteractingResidues(viewer, structure) {
         color: "element-symbol"
       }
     );
-
     focusCamera(viewer, ligand.cell.obj.data);
-
   }
 
-  /* build selection for ONLY the interacting residues */
-
   const nearbyResidues = findNearbyResidues();
-
-  // Extract sequence IDs from residue names like "ASP25" -> 25
   const seqIds = nearbyResidues
     .map(r => {
       const match = r.residue.match(/([A-Z]+)(\d+)/);
@@ -258,7 +247,6 @@ async function labelInteractingResidues(viewer, structure) {
   );
   const { Script } = await import("molstar/lib/mol-script/script");
 
-  // Build an expression that matches only residues with those seq IDs
   const expression = MS.struct.combinator.merge(
     seqIds.map(seqId =>
       MS.struct.generator.atomGroups({
@@ -270,7 +258,6 @@ async function labelInteractingResidues(viewer, structure) {
     )
   );
 
-  // Create a sub-component from that expression
   const interactingComponent =
     await viewer.plugin.builders.structure.tryCreateComponentFromExpression(
       structure.cell,
@@ -279,9 +266,6 @@ async function labelInteractingResidues(viewer, structure) {
     );
 
   if (interactingComponent) {
-
-    /* highlight as orange ball-and-stick so they stand out */
-
     await viewer.plugin.builders.structure.representation.addRepresentation(
       interactingComponent,
       {
@@ -293,8 +277,6 @@ async function labelInteractingResidues(viewer, structure) {
       }
     );
 
-    /* label only these residues */
-
     await viewer.plugin.builders.structure.representation.addRepresentation(
       interactingComponent,
       {
@@ -305,15 +287,12 @@ async function labelInteractingResidues(viewer, structure) {
         sizeFactor: 0.6
       }
     );
-
   }
-
 }
 
 /* ================= CHART ================= */
 
 function triggerChart(chartType, data = null) {
-
   const defaultData = [
     { residue: "ASP25", distance: 2.4 },
     { residue: "GLY27", distance: 2.9 },
@@ -330,7 +309,6 @@ function triggerChart(chartType, data = null) {
       }
     })
   );
-
 }
 
 /* ================= EXECUTION ENGINE ================= */
@@ -340,230 +318,252 @@ export async function executePlan(plan) {
   const viewer = getViewer();
   if (!viewer || !plan?.actions) return;
 
+  console.log("Executing plan with actions:", plan.actions);
+
   for (const action of plan.actions) {
+
+    console.log(`[ACTION] Executing: ${action.type}`, action);
 
     switch (action.type) {
 
       case "load_structure":
-
         await viewer.plugin.clear();
-
         await viewer.loadStructureFromUrl(
           `https://files.rcsb.org/download/${action.pdb_id}.cif`,
           "mmcif"
         );
-
         break;
 
       case "zoom": {
-
         const struct = await waitForStructure(viewer);
         if (!struct) break;
-
         focusCamera(viewer, struct.cell.obj.data);
-
         break;
       }
 
       case "show_surface": {
-
         const struct = await waitForStructure(viewer);
         if (!struct) break;
-
         const polymer = findPolymer(struct);
-
         clearAllRepresentations(viewer, struct);
-
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          polymer.cell,
-          {
-            type: "molecular-surface",
-            typeParams: { alpha: 0.7 }
-          }
-        );
-
+        await wait(100);
+        try {
+          await viewer.plugin.builders.structure.representation.addRepresentation(
+            polymer.cell,
+            { type: "molecular-surface", typeParams: { alpha: 0.7 } }
+          );
+          console.log("[SHOW_SURFACE] Done");
+        } catch (e) {
+          console.error("[SHOW_SURFACE] Failed:", e);
+        }
+        try { viewer.plugin.canvas3d?.requestRender(); } catch {}
         break;
       }
 
       case "highlight": {
-
         const struct = await waitForStructure(viewer);
         if (!struct) break;
-
         const ligand = findLigand(struct);
         if (!ligand) break;
-
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          ligand.cell,
-          {
-            type: "ball-and-stick",
-            color: "uniform",
-            colorParams: { value: 0xff0000 },
-            size: "physical",
-            sizeParams: { sizeFactor: 2 }
-          }
-        );
-
-        focusCamera(viewer, ligand.cell.obj.data);
-
-        break;
-      }
-
-      case "color_protein": {
-
-        const struct = await waitForStructure(viewer);
-        if (!struct) break;
-
-        const polymer = findPolymer(struct);
-        const ligand  = findLigand(struct);
-
-        clearAllRepresentations(viewer, struct);
-
-        /* redraw protein in the requested color */
-
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          polymer.cell,
-          {
-            type: "cartoon",
-            color: "uniform",
-            colorParams: { value: colorToHex(action.color) }
-          }
-        );
-
-        /* keep ligand visible after the color change */
-
-        if (ligand) {
-
+        try {
           await viewer.plugin.builders.structure.representation.addRepresentation(
             ligand.cell,
             {
               type: "ball-and-stick",
+              color: "uniform",
+              colorParams: { value: 0xff0000 },
               size: "physical",
-              sizeParams: { sizeFactor: 2 },
-              color: "element-symbol"
+              sizeParams: { sizeFactor: 2 }
             }
           );
-
+        } catch (e) {
+          console.error("[HIGHLIGHT] Failed:", e);
         }
-
+        focusCamera(viewer, ligand.cell.obj.data);
+        try { viewer.plugin.canvas3d?.requestRender(); } catch {}
         break;
       }
 
-      case "color_ligand": {
+      /* ================= COLOR PROTEIN (FIXED) ================= */
 
+      case "color_protein": {
         const struct = await waitForStructure(viewer);
         if (!struct) break;
 
         const polymer = findPolymer(struct);
         const ligand  = findLigand(struct);
+        const hexColor = colorToHex(action.color);
+
+        console.log("[COLOR_PROTEIN] Targeting color:", action.color, "->", hexColor);
+
+        // PRIMARY: patch colorTheme directly on each existing representation node
+        const updated = await applyColorToComponent(viewer, polymer, hexColor);
+
+        // FALLBACK: clear everything and rebuild with the new color
+        if (!updated) {
+          console.log("[COLOR_PROTEIN] No existing reps — rebuilding from scratch");
+          await clearAllRepresentations(viewer, struct);
+
+          try {
+            await viewer.plugin.builders.structure.representation.addRepresentation(
+              polymer.cell,
+              {
+                type: "cartoon",
+                color: "uniform",
+                colorParams: { value: hexColor }
+              }
+            );
+          } catch (e) {
+            console.error("[COLOR_PROTEIN] addRepresentation failed:", e);
+          }
+
+          if (ligand) {
+            try {
+              await viewer.plugin.builders.structure.representation.addRepresentation(
+                ligand.cell,
+                {
+                  type: "ball-and-stick",
+                  size: "physical",
+                  sizeParams: { sizeFactor: 2 },
+                  color: "element-symbol"
+                }
+              );
+            } catch (e) {
+              console.error("[COLOR_PROTEIN] ligand rep failed:", e);
+            }
+          }
+        }
+
+        try { viewer.plugin.canvas3d?.requestRender(); } catch {}
+        break;
+      }
+
+      /* ================= COLOR LIGAND (FIXED) ================= */
+
+      case "color_ligand": {
+        const struct = await waitForStructure(viewer);
+        if (!struct) break;
+
+        const polymer = findPolymer(struct);
+        const ligand  = findLigand(struct);
+        const hexColor = colorToHex(action.color);
 
         if (!ligand) break;
 
-        clearAllRepresentations(viewer, struct);
+        console.log("[COLOR_LIGAND] Targeting color:", action.color, "->", hexColor);
 
-        /* keep protein visible */
+        // PRIMARY: patch colorTheme directly on each existing representation node
+        const updated = await applyColorToComponent(viewer, ligand, hexColor);
 
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          polymer.cell,
-          {
-            type: "cartoon",
-            color: "chain-id"
+        // FALLBACK: clear everything and rebuild with the new color
+        if (!updated) {
+          console.log("[COLOR_LIGAND] No existing reps — rebuilding from scratch");
+          await clearAllRepresentations(viewer, struct);
+
+          try {
+            await viewer.plugin.builders.structure.representation.addRepresentation(
+              polymer.cell,
+              { type: "cartoon", color: "chain-id" }
+            );
+          } catch (e) {
+            console.error("[COLOR_LIGAND] protein rep failed:", e);
           }
-        );
 
-        /* redraw ligand in the requested color */
-
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          ligand.cell,
-          {
-            type: "ball-and-stick",
-            color: "uniform",
-            colorParams: { value: colorToHex(action.color) },
-            size: "physical",
-            sizeParams: { sizeFactor: 2 }
+          try {
+            await viewer.plugin.builders.structure.representation.addRepresentation(
+              ligand.cell,
+              {
+                type: "ball-and-stick",
+                color: "uniform",
+                colorParams: { value: hexColor },
+                size: "physical",
+                sizeParams: { sizeFactor: 2 }
+              }
+            );
+          } catch (e) {
+            console.error("[COLOR_LIGAND] ligand rep failed:", e);
           }
-        );
 
-        focusCamera(viewer, ligand.cell.obj.data);
+          focusCamera(viewer, ligand.cell.obj.data);
+        }
 
+        try { viewer.plugin.canvas3d?.requestRender(); } catch {}
         break;
       }
 
       case "publication_view": {
-
         const struct = await waitForStructure(viewer);
         if (!struct) break;
-
         const polymer = findPolymer(struct);
         const ligand = findLigand(struct);
-
         clearAllRepresentations(viewer, struct);
-
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          polymer.cell,
-          { type: "cartoon", color: "chain-id" }
-        );
-
-        await viewer.plugin.builders.structure.representation.addRepresentation(
-          polymer.cell,
-          {
-            type: "molecular-surface",
-            typeParams: { alpha: 0.25 },
-            color: "uniform",
-            colorParams: { value: 0xcccccc }
-          }
-        );
-
-        if (ligand) {
-
+        await wait(100);
+        try {
           await viewer.plugin.builders.structure.representation.addRepresentation(
-            ligand.cell,
+            polymer.cell,
+            { type: "cartoon", color: "chain-id" }
+          );
+          await viewer.plugin.builders.structure.representation.addRepresentation(
+            polymer.cell,
             {
-              type: "ball-and-stick",
-              size: "physical",
-              sizeParams: { sizeFactor: 2 },
-              color: "element-symbol"
+              type: "molecular-surface",
+              typeParams: { alpha: 0.25 },
+              color: "uniform",
+              colorParams: { value: 0xcccccc }
             }
           );
-
-          focusCamera(viewer, ligand.cell.obj.data);
-
+          if (ligand) {
+            await viewer.plugin.builders.structure.representation.addRepresentation(
+              ligand.cell,
+              {
+                type: "ball-and-stick",
+                size: "physical",
+                sizeParams: { sizeFactor: 2 },
+                color: "element-symbol"
+              }
+            );
+            focusCamera(viewer, ligand.cell.obj.data);
+          }
+          console.log("[PUBLICATION_VIEW] Done");
+        } catch (e) {
+          console.error("[PUBLICATION_VIEW] Failed:", e);
         }
-
+        try { viewer.plugin.canvas3d?.requestRender(); } catch {}
         break;
       }
 
       case "show_interactions": {
-
         const struct = await waitForStructure(viewer);
         if (!struct) break;
-
-        await showInteractionResidues(viewer, struct);
-
+        try {
+          await showInteractionResidues(viewer, struct);
+          console.log("[SHOW_INTERACTIONS] Completed");
+          viewer.plugin.canvas3d?.requestRender?.();
+        } catch (e) {
+          console.error("[SHOW_INTERACTIONS] Failed:", e);
+        }
         break;
       }
 
       case "label_residues": {
-
         const struct = await waitForStructure(viewer);
         if (!struct) break;
-
-        // NEW: labels only the 5 interacting residues, not the whole protein
-        await labelInteractingResidues(viewer, struct);
-
+        try {
+          await labelInteractingResidues(viewer, struct);
+          console.log("[LABEL_RESIDUES] Completed");
+          viewer.plugin.canvas3d?.requestRender?.();
+        } catch (e) {
+          console.error("[LABEL_RESIDUES] Failed:", e);
+        }
         break;
       }
 
       case "show_chart":
-
         triggerChart(action.chart, action.data);
-
         break;
 
     }
 
     await wait(120);
-
   }
-
 }

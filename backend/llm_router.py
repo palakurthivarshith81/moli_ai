@@ -11,7 +11,11 @@ API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 FREE_MODELS = [
    # "nvidia/nemotron-3-super-120b-a12b:free"
-    "stepfun/step-3.5-flash:free"
+    #"qwen/qwen3.6-plus-preview:free"
+    #"z-ai/glm-4.5-air:free"
+    #"minimax/minimax-m2.5:free"
+   # "stepfun/step-3.5-flash:free"
+    "nvidia/nemotron-3-super-120b-a12b:free"
 ]
 
 PREMIUM_MODELS = [
@@ -32,8 +36,12 @@ Format:
     { "type": "load_structure", "pdb_id": "4HHB" },
     { "type": "zoom" },
     { "type": "show_surface" },
+    { "type": "show_interactions" },
+    { "type": "label_residues" },
     { "type": "highlight", "selection": "ligand" },
-    { "type": "color_protein", "color": "red" }
+    { "type": "color_protein", "color": "red" },
+    { "type": "color_ligand", "color": "blue" },
+    { "type": "publication_view" }
   ]
 }
 
@@ -43,18 +51,18 @@ Rules:
 - NO explanation outside JSON
 - actions must be valid
 
-Allowed actions:
-- load_structure
-- zoom
-- show_surface
-- highlight
-- color_protein
-- color_ligand
-- publication_view
-- focus_compound
-- label_residues
+Action reference:
+- load_structure: Requires "pdb_id" (e.g., "4HHB")
+- zoom: Focus on structure
+- show_surface: Display molecular surface
+- show_interactions: Highlight ligand interactions
+- label_residues: Show nearby residue labels
+- highlight: Requires "selection" (e.g., "ligand")
+- color_protein: Requires "color" (red, blue, green, yellow, orange, purple, cyan, magenta, white, gray, black)
+- color_ligand: Requires "color" (same color list as color_protein)
+- publication_view: Professional rendering with surface
 
-If no action → return "actions": []
+If no action needed → return "actions": []
 """
 
 # ================= JSON CLEANER =================
@@ -141,6 +149,7 @@ async def call_llm(prompt, mode="free"):
                 raise ValueError("JSON extraction failed")
 
             print("SUCCESS:", model)
+            print("FINAL RESPONSE:", json_text)
 
             return {
                 "text": json_text.strip(),
